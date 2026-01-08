@@ -14,8 +14,8 @@ const app = express();
 
 export const db = mysql.createConnection({
     host: process.env.NODE_ENV === 'production'
-        ? process.env.MYSQL_HOST   // Railway host for Render
-        : 'localhost',             // Local MySQL
+        ? process.env.MYSQL_HOST   // Railway host on Render
+        : 'localhost',             // Local dev
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE,
@@ -26,7 +26,6 @@ db.connect(err => {
     if (err) console.error('MySQL connection error:', err);
     else console.log('MySQL connected successfully!');
 });
-
 
 
 
@@ -136,7 +135,7 @@ const verifyUser = (req, res, next) => {
     if (!token) return res.json({ Error: "You are not authenticated" });
     else {
 
-        jwt.verify(token, "jwt-secret-key", (err, decoded) => {
+        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
             if (err) return res.json({ Error: "Token is not okay" });
             else{
                 req.name = decoded.name;
@@ -181,7 +180,7 @@ app.post('/login', (req, res) => {
                 if (err) return res.json({ error: "Error comparing passwords" });
                 if (isMatch) {
                     const name = result[0].name;
-                    const token = jwt.sign({ name }, "jwt-secret-key", { expiresIn: '1h' });
+                    const token = jwt.sign({ name }, process.env.JWT_SECRET, { expiresIn: '1h' });
                     res.cookie('token', token);
                     // const token = jwt.sign({ username: result[0].username }, process.env.SECRET_KEY, { expiresIn: '1h' });
                     // res.cookie('token', token, { httpOnly: true }).json({ status: 'Logged in successfully' });
