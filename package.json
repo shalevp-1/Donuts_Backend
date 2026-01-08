@@ -3,19 +3,22 @@
   "version": "1.0.0",
   "description": "",
   "main": "database.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/shalevp-1/donuts-backend.git"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon database.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
-  "bugs": {
-    "url": "https://github.com/shalevp-1/donuts-backend/issues"
-  },
-  "homepage": "https://github.com/shalevp-1/donuts-backend#readme"
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "nodemon": "^3.1.4"
+  }
 }
