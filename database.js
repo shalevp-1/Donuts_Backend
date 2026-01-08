@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
 
-import mysql from "mysql2";
+// import mysql from "mysql2";
 
 export const db = mysql.createConnection({
     host: process.env.MYSQL_HOST,
