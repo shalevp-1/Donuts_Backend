@@ -15,18 +15,29 @@ const app = express();
 
 
 export const db = mysql.createConnection({
-    host: process.env.MYSQL_HOST,
+    host: process.env.NODE_ENV === 'production'
+        ? process.env.MYSQL_HOST        // Render / production host
+        : 'localhost',                  // local development host
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE,
-    port: process.env.MYSQL_PORT
+    port: Number(process.env.MYSQL_PORT) // convert port to number
+});
+
+// Test the connection immediately
+db.connect((err) => {
+    if (err) {
+        console.error('MySQL connection error:', err);
+    } else {
+        console.log('MySQL connected successfully!');
+    }
 });
 
 
 
 app.use(express.json());
 app.use(cors({
-    origin: true,
+    origin: ['http://localhost:3000'],
     methods: ["POST", "PUT", "DELETE", "GET"],
     credentials: true
 }
