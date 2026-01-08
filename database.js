@@ -24,13 +24,13 @@ export const db = mysql.createConnection({
 
 
 
-app.use(express.json());
-app.use(cors({
-    origin: ['http://localhost:3000'],
-    methods: ["POST", "PUT", "DELETE", "GET"],
-    credentials: true
-}
-));
+// app.use(express.json());
+// app.use(cors({
+//     origin: ['http://localhost:3000'],
+//     methods: ["POST", "PUT", "DELETE", "GET"],
+//     credentials: true
+// }
+// ));
 app.use(cookieParser());
 
 // const db = mysql.createConnection({
@@ -199,7 +199,7 @@ app.get('/logout',(req, res) => {
 })
 
 
-app.listen(46964, () => {
+app.listen(8800, () => {
     console.log("Connected to server");
 
 });
