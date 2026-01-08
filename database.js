@@ -31,7 +31,7 @@ db.connect(err => {
 
 app.use(express.json());
 app.use(cors({
-    origin: ['http://localhost:3000'],
+    origin: true,
     methods: ["POST", "PUT", "DELETE", "GET"],
     credentials: true
 }
@@ -135,7 +135,7 @@ const verifyUser = (req, res, next) => {
     if (!token) return res.json({ Error: "You are not authenticated" });
     else {
 
-        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        jwt.verify(token, "jwt-secret-key", (err, decoded) => {
             if (err) return res.json({ Error: "Token is not okay" });
             else{
                 req.name = decoded.name;
@@ -180,7 +180,7 @@ app.post('/login', (req, res) => {
                 if (err) return res.json({ error: "Error comparing passwords" });
                 if (isMatch) {
                     const name = result[0].name;
-                    const token = jwt.sign({ name }, process.env.JWT_SECRET, { expiresIn: '1h' });
+                    const token = jwt.sign({ name }, "jwt-secret-key", { expiresIn: '1h' });
                     res.cookie('token', token);
                     // const token = jwt.sign({ username: result[0].username }, process.env.SECRET_KEY, { expiresIn: '1h' });
                     // res.cookie('token', token, { httpOnly: true }).json({ status: 'Logged in successfully' });
@@ -204,7 +204,11 @@ app.get('/logout',(req, res) => {
 })
 
 
-app.listen(8800, () => {
-    console.log("Connected to server");
+// app.listen(8800, () => {
+//     console.log("Connected to server");
 
+// });
+const PORT = process.env.PORT || 8800;
+app.listen(PORT, () => {
+    console.log(`Server on port ${PORT}`);
 });
