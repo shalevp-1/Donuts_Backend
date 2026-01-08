@@ -3,10 +3,8 @@ import dotenv from 'dotenv';
 import mysql from 'mysql2';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
-// import bcrypt from 'bcrypt';
+import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
-
-const bcrypt = require("bcryptjs");
 
 const saltRounds = 10;
 
@@ -135,113 +133,50 @@ app.get('/donutsv', verifyUser, (req, res) => {
     return res.json({ status: "Success", name: req.name })
 })
 
-
-app.post("/register", async (req, res) => {
-    try {
-        const { username, email, password } = req.body;
-
-        const hash = await bcrypt.hash(password.toString(), 10);
+app.post("/register", (req, res) => {
+    bcrypt.hash(req.body.password.toString(), saltRounds, (err, hash) => {
+        if (err) return res.json({ Error: "Error hashing password" });
 
         const q = "INSERT INTO login (username, email, password) VALUES (?)";
-        const values = [username, email, hash];
+        const values = [
+            req.body.username,
+            req.body.email,
+            hash
+        ];
 
         db.query(q, [values], (err, data) => {
-            if (err) return res.status(500).json(err);
+            if (err) return res.json(err);
             return res.json({ Status: "Success" });
         });
-
-    } catch (err) {
-        return res.status(500).json({ Error: "Error hashing password" });
-    }
-});
-
-// app.post("/register", (req, res) => {
-//     bcrypt.hash(req.body.password.toString(), saltRounds, (err, hash) => {
-//         if (err) return res.json({ Error: "Error hashing password" });
-
-//         const q = "INSERT INTO login (username, email, password) VALUES (?)";
-//         const values = [
-//             req.body.username,
-//             req.body.email,
-//             hash
-//         ];
-
-//         db.query(q, [values], (err, data) => {
-//             if (err) return res.json(err);
-//             return res.json({ Status: "Success" });
-//         });
-//     });
-// });
-
-// app.post('/login', (req, res) => {
-//     const q = "SELECT * FROM login WHERE username =?"
-
-
-//     db.query(q, [req.body.username], (err, result) => {
-//         if (err) return res.json({ error: "Error querying database" });
-//         if (result.length > 0) {
-//             bcrypt.compare(req.body.password.toString(), result[0].password, (err, isMatch) => {
-//                 if (err) return res.json({ error: "Error comparing passwords" });
-//                 if (isMatch) {
-//                     const name = result[0].name;
-//                     const token = jwt.sign({ name }, "jwt-secret-key", { expiresIn: '1h' });
-//                     res.cookie('token', token);
-//                     // const token = jwt.sign({ username: result[0].username }, process.env.SECRET_KEY, { expiresIn: '1h' });
-//                     // res.cookie('token', token, { httpOnly: true }).json({ status: 'Logged in successfully' });
-//                     return res.json({ status: 'Logged in successfully' });
-//                 } else {
-//                     return res.json({ error: 'Invalid password' });
-//                 }
-//             });
-//         }
-//         else {
-//             return res.json({ error: "user not found" })
-//         }
-//     })
-// });
-
-app.post("/login", async (req, res) => {
-    const q = "SELECT * FROM login WHERE username = ?";
-
-    db.query(q, [req.body.username], async (err, result) => {
-        if (err) return res.status(500).json({ error: "Error querying database" });
-
-        if (result.length === 0) {
-            return res.status(401).json({ error: "User not found" });
-        }
-
-        try {
-            const isMatch = await bcrypt.compare(
-                req.body.password.toString(),
-                result[0].password
-            );
-
-            if (!isMatch) {
-                return res.status(401).json({ error: "Invalid password" });
-            }
-
-            const name = result[0].username;
-
-            const token = jwt.sign(
-                { name },
-                process.env.JWT_SECRET,
-                { expiresIn: "1h" }
-            );
-
-            res.cookie("token", token, {
-                httpOnly: true,
-                sameSite: "lax",
-                secure: process.env.NODE_ENV === "production"
-            });
-
-            return res.json({ status: "Logged in successfully" });
-
-        } catch (err) {
-            return res.status(500).json({ error: "Login failed" });
-        }
     });
 });
 
+app.post('/login', (req, res) => {
+    const q = "SELECT * FROM login WHERE username =?"
+
+
+    db.query(q, [req.body.username], (err, result) => {
+        if (err) return res.json({ error: "Error querying database" });
+        if (result.length > 0) {
+            bcrypt.compare(req.body.password.toString(), result[0].password, (err, isMatch) => {
+                if (err) return res.json({ error: "Error comparing passwords" });
+                if (isMatch) {
+                    const name = result[0].name;
+                    const token = jwt.sign({ name }, "jwt-secret-key", { expiresIn: '1h' });
+                    res.cookie('token', token);
+                    // const token = jwt.sign({ username: result[0].username }, process.env.SECRET_KEY, { expiresIn: '1h' });
+                    // res.cookie('token', token, { httpOnly: true }).json({ status: 'Logged in successfully' });
+                    return res.json({ status: 'Logged in successfully' });
+                } else {
+                    return res.json({ error: 'Invalid password' });
+                }
+            });
+        }
+        else {
+            return res.json({ error: "user not found" })
+        }
+    })
+});
 
 
 app.get('/logout',(req, res) => {
