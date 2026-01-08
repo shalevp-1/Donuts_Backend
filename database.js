@@ -6,8 +6,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
 
-// import mysql from "mysql2";
-
+import mysql from "mysql2";
 const saltRounds = 10;
 
 dotenv.config();
@@ -15,23 +14,13 @@ const app = express();
 
 
 export const db = mysql.createConnection({
-    host: process.env.NODE_ENV === 'production'
-        ? process.env.MYSQL_HOST        // Render / production host
-        : 'localhost',                  // local development host
+    host: process.env.MYSQL_HOST,
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE,
-    port: Number(process.env.MYSQL_PORT) // convert port to number
+    port: process.env.MYSQL_PORT
 });
 
-// Test the connection immediately
-db.connect((err) => {
-    if (err) {
-        console.error('MySQL connection error:', err);
-    } else {
-        console.log('MySQL connected successfully!');
-    }
-});
 
 
 
@@ -44,12 +33,12 @@ app.use(cors({
 ));
 app.use(cookieParser());
 
-// const db = mysql.createConnection({
-//     host: process.env.MYSQL_HOST,
-//     user: process.env.MYSQL_USER,
-//     password: process.env.MYSQL_PASSWORD,
-//     database: process.env.MYSQL_DATABASE
-// });
+const db = mysql.createConnection({
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE
+});
 
 
 
