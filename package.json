@@ -5,8 +5,9 @@
   "main": "database.js",
   "type": "module",
   "scripts": {
+    "dev": "nodemon database.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon database.js"
+    "start": "node database.js"
   },
   "keywords": [],
   "author": "",

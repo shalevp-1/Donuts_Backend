@@ -11,21 +11,104 @@ const saltRounds = 10;
 
 dotenv.config();
 const jwtSecret = process.env.JWT_SECRET || "jwt-secret-key";
+const isProduction = process.env.NODE_ENV === 'production';
+const requiredTableNames = ['donuts', 'login', 'purchase_orders', 'purchase_items'];
 const app = express();
-
-export const db = mysql.createConnection({
-    host: process.env.NODE_ENV === 'production'
-        ? process.env.MYSQL_HOST   // Railway host on Render
-        : 'localhost',             // Local dev
-    user: process.env.MYSQL_USER,
-    password: process.env.MYSQL_PASSWORD,
+const dbConfig = {
+    host: process.env.MYSQL_HOST || 'localhost',
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || '',
     database: process.env.MYSQL_DATABASE,
-    port: Number(process.env.MYSQL_PORT)
-});
+    port: Number(process.env.MYSQL_PORT || 3306)
+};
+let isSchemaReady = false;
+let lastDatabaseIssue = '';
 
-db.connect(err => {
-    if (err) console.error('MySQL connection error:', err);
-    else console.log('MySQL connected successfully!');
+export const db = mysql.createConnection(dbConfig);
+
+const runDbQuery = (query, values = []) =>
+    new Promise((resolve, reject) => {
+        db.query(query, values, (err, result) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            resolve(result);
+        });
+    });
+
+const initializeDatabase = async () => {
+    const schemaStatements = [
+        `
+            CREATE TABLE IF NOT EXISTS donuts (
+                id INT NOT NULL AUTO_INCREMENT,
+                name VARCHAR(255) NOT NULL,
+                description TEXT NOT NULL,
+                price DECIMAL(10, 2) NOT NULL,
+                ingredients TEXT NOT NULL,
+                calories INT NOT NULL,
+                image TEXT NOT NULL,
+                PRIMARY KEY (id)
+            )
+        `,
+        `
+            CREATE TABLE IF NOT EXISTS login (
+                id INT NOT NULL AUTO_INCREMENT,
+                username VARCHAR(100) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'user',
+                points INT NOT NULL DEFAULT 0,
+                purchase_count INT NOT NULL DEFAULT 0,
+                total_spent DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY unique_username (username),
+                UNIQUE KEY unique_email (email)
+            )
+        `,
+        `
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                id INT NOT NULL AUTO_INCREMENT,
+                user_id INT NOT NULL,
+                item_count INT NOT NULL,
+                subtotal DECIMAL(10, 2) NOT NULL,
+                service_fee DECIMAL(10, 2) NOT NULL DEFAULT 0,
+                total DECIMAL(10, 2) NOT NULL,
+                points_earned INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_purchase_orders_user_id (user_id)
+            )
+        `,
+        `
+            CREATE TABLE IF NOT EXISTS purchase_items (
+                id INT NOT NULL AUTO_INCREMENT,
+                purchase_id INT NOT NULL,
+                donut_id INT NOT NULL,
+                quantity INT NOT NULL,
+                price_each DECIMAL(10, 2) NOT NULL,
+                line_total DECIMAL(10, 2) NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_purchase_items_purchase_id (purchase_id),
+                KEY idx_purchase_items_donut_id (donut_id)
+            )
+        `
+    ];
+
+    for (const statement of schemaStatements) {
+        await runDbQuery(statement);
+    }
+
+    isSchemaReady = true;
+    lastDatabaseIssue = '';
+};
+
+const getAuthCookieOptions = () => ({
+    httpOnly: true,
+    sameSite: isProduction ? 'none' : 'lax',
+    secure: isProduction
 });
 
 
@@ -126,6 +209,40 @@ const verifyUser = (req, res, next) => {
 
 app.get('/', (req, res) => {
     res.json("hello backend")
+});
+
+app.get('/health/db', async (req, res) => {
+    try {
+        await runDbQuery('SELECT 1 AS dbOk');
+
+        const placeholders = requiredTableNames.map(() => '?').join(', ');
+        const tableRows = await runDbQuery(
+            `
+                SELECT table_name AS tableName
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                AND table_name IN (${placeholders})
+            `,
+            [dbConfig.database, ...requiredTableNames]
+        );
+
+        const foundTables = tableRows.map((row) => row.tableName);
+        const missingTables = requiredTableNames.filter((tableName) => !foundTables.includes(tableName));
+
+        return res.status(missingTables.length === 0 ? 200 : 503).json({
+            status: missingTables.length === 0 ? 'ok' : 'degraded',
+            schemaReady: isSchemaReady,
+            missingTables,
+            lastDatabaseIssue
+        });
+    } catch (error) {
+        return res.status(503).json({
+            status: 'error',
+            schemaReady: isSchemaReady,
+            missingTables: requiredTableNames,
+            lastDatabaseIssue: error.code || error.message || 'Database health check failed.'
+        });
+    }
 });
 
 app.get("/donuts", (req, res) => {
@@ -618,9 +735,7 @@ app.post('/login', (req, res) => {
                     const id = result[0].id;
                     const token = jwt.sign({ id, name, role }, jwtSecret, { expiresIn: '1h' });
                     res.cookie('token', token, {
-                        httpOnly: true,
-                        sameSite: 'lax',
-                        secure: process.env.NODE_ENV === 'production',
+                        ...getAuthCookieOptions(),
                         maxAge: 60 * 60 * 1000
                     });
                     return res.json({ status: 'Logged in successfully' });
@@ -637,7 +752,7 @@ app.post('/login', (req, res) => {
 
 
 app.get('/logout',(req, res) => {
-    res.clearCookie('token');
+    res.clearCookie('token', getAuthCookieOptions());
     return res.json({ status: 'Logged out successfully' });
 
 })
@@ -648,6 +763,35 @@ app.get('/logout',(req, res) => {
 
 // });
 const PORT = process.env.PORT || 8800;
-app.listen(PORT, () => {
-    console.log(`Server on port ${PORT}`);
+let hasStartedServer = false;
+const startServer = () => {
+    if (hasStartedServer) {
+        return;
+    }
+
+    hasStartedServer = true;
+    app.listen(PORT, () => {
+        console.log(`Server on port ${PORT}`);
+    });
+};
+
+db.connect(async (err) => {
+    if (err) {
+        lastDatabaseIssue = err.code || err.message || 'Initial database connection failed.';
+        console.error('MySQL connection error:', err);
+        startServer();
+        return;
+    }
+
+    console.log('MySQL connected successfully!');
+
+    try {
+        await initializeDatabase();
+        console.log('MySQL schema ready.');
+    } catch (schemaError) {
+        lastDatabaseIssue = schemaError.code || schemaError.message || 'Schema initialization failed.';
+        console.error('MySQL schema initialization error:', schemaError);
+    }
+
+    startServer();
 });
