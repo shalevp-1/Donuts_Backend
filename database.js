@@ -13,6 +13,7 @@ dotenv.config();
 const jwtSecret = process.env.JWT_SECRET || "jwt-secret-key";
 const isProduction = process.env.NODE_ENV === 'production';
 const requiredTableNames = ['donuts', 'login', 'purchase_orders', 'purchase_items'];
+const requiredDbEnvNames = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_PORT'];
 const app = express();
 const dbConfig = {
     host: process.env.MYSQL_HOST || 'localhost',
@@ -23,6 +24,9 @@ const dbConfig = {
 };
 let isSchemaReady = false;
 let lastDatabaseIssue = '';
+
+const getMissingDbEnvVars = () =>
+    requiredDbEnvNames.filter((envName) => !process.env[envName]?.toString().trim());
 
 export const db = mysql.createConnection(dbConfig);
 
@@ -212,6 +216,18 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health/db', async (req, res) => {
+    const missingEnvVars = getMissingDbEnvVars();
+
+    if (missingEnvVars.length > 0) {
+        return res.status(503).json({
+            status: 'error',
+            schemaReady: isSchemaReady,
+            missingTables: requiredTableNames,
+            missingEnvVars,
+            lastDatabaseIssue: lastDatabaseIssue || `Missing required database env vars: ${missingEnvVars.join(', ')}`
+        });
+    }
+
     try {
         await runDbQuery('SELECT 1 AS dbOk');
 
@@ -233,6 +249,7 @@ app.get('/health/db', async (req, res) => {
             status: missingTables.length === 0 ? 'ok' : 'degraded',
             schemaReady: isSchemaReady,
             missingTables,
+            missingEnvVars,
             lastDatabaseIssue
         });
     } catch (error) {
@@ -240,7 +257,8 @@ app.get('/health/db', async (req, res) => {
             status: 'error',
             schemaReady: isSchemaReady,
             missingTables: requiredTableNames,
-            lastDatabaseIssue: error.code || error.message || 'Database health check failed.'
+            missingEnvVars,
+            lastDatabaseIssue: lastDatabaseIssue || error.code || error.message || 'Database health check failed.'
         });
     }
 });
@@ -776,6 +794,15 @@ const startServer = () => {
 };
 
 db.connect(async (err) => {
+    const missingEnvVars = getMissingDbEnvVars();
+
+    if (missingEnvVars.length > 0) {
+        lastDatabaseIssue = `Missing required database env vars: ${missingEnvVars.join(', ')}`;
+        console.error(lastDatabaseIssue);
+        startServer();
+        return;
+    }
+
     if (err) {
         lastDatabaseIssue = err.code || err.message || 'Initial database connection failed.';
         console.error('MySQL connection error:', err);
