@@ -153,8 +153,31 @@ const initializeDatabase = async () => {
 const getAuthCookieOptions = () => ({
     httpOnly: true,
     sameSite: isProduction ? 'none' : 'lax',
-    secure: isProduction
+    secure: isProduction,
+    path: '/'
 });
+
+const applyNoStore = (res) => {
+    res.set({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+        Pragma: 'no-cache',
+        Expires: '0'
+    });
+};
+
+const clearAuthCookie = (res) => {
+    const baseOptions = getAuthCookieOptions();
+    const clearVariants = [
+        baseOptions,
+        { ...baseOptions, path: '/api' },
+        { path: '/' },
+        { path: '/api' }
+    ];
+
+    clearVariants.forEach((options) => {
+        res.clearCookie('token', options);
+    });
+};
 
 
 
@@ -420,6 +443,7 @@ app.put("/donuts/:id", verifyUser, verifyAdmin, (req, res) => {
     })
 })
 app.get('/me', verifyUser, (req, res) => {
+    applyNoStore(res);
     const q = "SELECT id, username, role, COALESCE(points, 0) AS points, COALESCE(purchase_count, 0) AS purchaseCount, COALESCE(total_spent, 0) AS totalSpent FROM login WHERE id = ? LIMIT 1";
 
     db.query(q, [req.userId], (err, result) => {
@@ -773,6 +797,7 @@ app.post("/register", (req, res) => {
 });
 
 app.post('/login', (req, res) => {
+    applyNoStore(res);
     const username = req.body.username?.trim();
     const password = req.body.password?.toString();
 
@@ -810,17 +835,19 @@ app.post('/login', (req, res) => {
 });
 
 
-app.get('/logout',(req, res) => {
-    res.clearCookie('token', getAuthCookieOptions());
-    return res.json({ status: 'Logged out successfully' });
-
-})
-
-
 // app.listen(8800, () => {
 //     console.log("Connected to server");
 
 // });
+const logoutHandler = (req, res) => {
+    applyNoStore(res);
+    clearAuthCookie(res);
+    return res.json({ status: 'Logged out successfully' });
+};
+
+app.post('/logout', logoutHandler);
+app.get('/logout', logoutHandler);
+
 const PORT = process.env.PORT || 8800;
 let hasStartedServer = false;
 const startServer = () => {
