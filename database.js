@@ -21,6 +21,7 @@ let lastDatabaseIssue = '';
 
 const getMissingDbEnvVars = () =>
     requiredDbEnvNames.filter((envName) => !process.env[envName]?.toString().trim());
+const EMAIL_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS || 12000);
 
 const parseBooleanEnv = (value, fallback = false) => {
     if (value === undefined) {
@@ -202,6 +203,9 @@ const createMailTransporter = async () => {
             host: process.env.EMAIL_HOST,
             port: Number(process.env.EMAIL_PORT) || 587,
             secure: process.env.EMAIL_SECURE === 'true',
+            connectionTimeout: Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS || 10000),
+            greetingTimeout: Number(process.env.EMAIL_GREETING_TIMEOUT_MS || 10000),
+            socketTimeout: Number(process.env.EMAIL_SOCKET_TIMEOUT_MS || 12000),
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS
@@ -222,19 +226,24 @@ const sendSignupConfirmationEmail = async (username, email) => {
 
     const fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
-    await transporter.sendMail({
-        from: fromAddress,
-        to: email,
-        subject: 'Welcome to Donuts for you',
-        html: `
-            <div style="font-family: Arial, sans-serif; color: #2f241e; line-height: 1.6;">
-                <h1 style="margin-bottom: 0.4rem;">Welcome, ${username}.</h1>
-                <p>Your Donuts for you account has been created successfully.</p>
-                <p>You can now sign in, save your favorites, collect points, and manage your purchases.</p>
-                <p style="margin-top: 1.2rem;">See you soon,<br />Donuts for you</p>
-            </div>
-        `
-    });
+    await Promise.race([
+        transporter.sendMail({
+            from: fromAddress,
+            to: email,
+            subject: 'Welcome to Donuts for you',
+            html: `
+                <div style="font-family: Arial, sans-serif; color: #2f241e; line-height: 1.6;">
+                    <h1 style="margin-bottom: 0.4rem;">Welcome, ${username}.</h1>
+                    <p>Your Donuts for you account has been created successfully.</p>
+                    <p>You can now sign in, save your favorites, collect points, and manage your purchases.</p>
+                    <p style="margin-top: 1.2rem;">See you soon,<br />Donuts for you</p>
+                </div>
+            `
+        }),
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Signup email timed out.')), EMAIL_SEND_TIMEOUT_MS);
+        })
+    ]);
 
     return true;
 };
@@ -734,6 +743,7 @@ app.delete('/users/:id', verifyUser, verifyAdmin, (req, res) => {
 })
 
 app.post("/register", (req, res) => {
+    applyNoStore(res);
     const username = req.body.username?.trim();
     const email = req.body.email?.trim().toLowerCase();
     const password = req.body.password?.toString();
@@ -775,21 +785,19 @@ app.post("/register", (req, res) => {
         db.query(q, [values], (err, data) => {
             if (err) return res.status(500).json({ error: "We could not create your account right now." });
 
+            res.status(201).json({
+                status: "Success",
+                message: "Your account has been created successfully."
+            });
+
             sendSignupConfirmationEmail(username, email)
                 .then((emailSent) => {
-                    return res.status(201).json({
-                        status: "Success",
-                        message: emailSent
-                            ? "Your account has been created and a confirmation email has been sent."
-                            : "Your account has been created."
-                    });
+                    if (!emailSent) {
+                        console.warn(`Signup confirmation email skipped for ${email}.`);
+                    }
                 })
                 .catch((mailErr) => {
                     console.error('Signup confirmation email error:', mailErr);
-                    return res.status(201).json({
-                        status: "Success",
-                        message: "Your account has been created."
-                    });
                 });
         });
     });
