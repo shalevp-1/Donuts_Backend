@@ -11,8 +11,27 @@ import fs from 'node:fs';
 const saltRounds = 10;
 
 dotenv.config();
-const jwtSecret = process.env.JWT_SECRET || "jwt-secret-key";
-const isProduction = process.env.NODE_ENV === 'production';
+const readEnvValue = (envName, fallback = '') => {
+    const rawValue = process.env[envName];
+
+    if (rawValue === undefined || rawValue === null) {
+        return fallback;
+    }
+
+    const trimmed = rawValue.toString().trim();
+
+    if (
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+        return trimmed.slice(1, -1).trim();
+    }
+
+    return trimmed;
+};
+
+const jwtSecret = readEnvValue('JWT_SECRET', "jwt-secret-key");
+const isProduction = readEnvValue('NODE_ENV') === 'production';
 const requiredTableNames = ['donuts', 'login', 'purchase_orders', 'purchase_items'];
 const requiredDbEnvNames = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_PORT'];
 const app = express();
@@ -20,8 +39,8 @@ let isSchemaReady = false;
 let lastDatabaseIssue = '';
 
 const getMissingDbEnvVars = () =>
-    requiredDbEnvNames.filter((envName) => !process.env[envName]?.toString().trim());
-const EMAIL_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS || 12000);
+    requiredDbEnvNames.filter((envName) => !readEnvValue(envName));
+const EMAIL_SEND_TIMEOUT_MS = Number(readEnvValue('EMAIL_SEND_TIMEOUT_MS', '12000'));
 
 const parseBooleanEnv = (value, fallback = false) => {
     if (value === undefined) {
@@ -32,41 +51,45 @@ const parseBooleanEnv = (value, fallback = false) => {
 };
 
 const getMysqlSslConfig = () => {
-    const host = process.env.MYSQL_HOST || '';
-    const shouldUseSsl = parseBooleanEnv(process.env.MYSQL_SSL, /aivencloud\.com$/i.test(host));
+    const host = readEnvValue('MYSQL_HOST');
+    const shouldUseSsl = parseBooleanEnv(readEnvValue('MYSQL_SSL'), /aivencloud\.com$/i.test(host));
 
     if (!shouldUseSsl) {
         return undefined;
     }
 
     const sslConfig = {
-        rejectUnauthorized: parseBooleanEnv(process.env.MYSQL_SSL_REJECT_UNAUTHORIZED, true)
+        rejectUnauthorized: parseBooleanEnv(readEnvValue('MYSQL_SSL_REJECT_UNAUTHORIZED'), true)
     };
 
-    if (process.env.MYSQL_CA_CERT_BASE64) {
-        sslConfig.ca = Buffer.from(process.env.MYSQL_CA_CERT_BASE64, 'base64').toString('utf8');
+    const mysqlCaCertBase64 = readEnvValue('MYSQL_CA_CERT_BASE64');
+    const mysqlCaCert = readEnvValue('MYSQL_CA_CERT');
+    const mysqlCaCertPath = readEnvValue('MYSQL_CA_CERT_PATH');
+
+    if (mysqlCaCertBase64) {
+        sslConfig.ca = Buffer.from(mysqlCaCertBase64, 'base64').toString('utf8');
         return sslConfig;
     }
 
-    if (process.env.MYSQL_CA_CERT) {
-        sslConfig.ca = process.env.MYSQL_CA_CERT;
+    if (mysqlCaCert) {
+        sslConfig.ca = mysqlCaCert;
         return sslConfig;
     }
 
-    if (process.env.MYSQL_CA_CERT_PATH) {
-        sslConfig.ca = fs.readFileSync(process.env.MYSQL_CA_CERT_PATH, 'utf8');
+    if (mysqlCaCertPath) {
+        sslConfig.ca = fs.readFileSync(mysqlCaCertPath, 'utf8');
     }
 
     return sslConfig;
 };
 
 const dbConfig = {
-    host: process.env.MYSQL_HOST || 'localhost',
-    user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE,
-    port: Number(process.env.MYSQL_PORT || 3306),
-    connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT || 15000),
+    host: readEnvValue('MYSQL_HOST', 'localhost'),
+    user: readEnvValue('MYSQL_USER', 'root'),
+    password: readEnvValue('MYSQL_PASSWORD'),
+    database: readEnvValue('MYSQL_DATABASE'),
+    port: Number(readEnvValue('MYSQL_PORT', '3306')),
+    connectTimeout: Number(readEnvValue('MYSQL_CONNECT_TIMEOUT', '15000')),
     ssl: getMysqlSslConfig()
 };
 
@@ -192,7 +215,11 @@ app.use(cors({
 app.use(cookieParser());
 
 const createMailTransporter = async () => {
-    if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    const emailHost = readEnvValue('EMAIL_HOST');
+    const emailUser = readEnvValue('EMAIL_USER');
+    const emailPass = readEnvValue('EMAIL_PASS');
+
+    if (!emailHost || !emailUser || !emailPass) {
         return null;
     }
 
@@ -200,15 +227,15 @@ const createMailTransporter = async () => {
         const nodemailer = await import('nodemailer');
 
         return nodemailer.default.createTransport({
-            host: process.env.EMAIL_HOST,
-            port: Number(process.env.EMAIL_PORT) || 587,
-            secure: process.env.EMAIL_SECURE === 'true',
-            connectionTimeout: Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS || 10000),
-            greetingTimeout: Number(process.env.EMAIL_GREETING_TIMEOUT_MS || 10000),
-            socketTimeout: Number(process.env.EMAIL_SOCKET_TIMEOUT_MS || 12000),
+            host: emailHost,
+            port: Number(readEnvValue('EMAIL_PORT', '587')) || 587,
+            secure: readEnvValue('EMAIL_SECURE') === 'true',
+            connectionTimeout: Number(readEnvValue('EMAIL_CONNECTION_TIMEOUT_MS', '10000')),
+            greetingTimeout: Number(readEnvValue('EMAIL_GREETING_TIMEOUT_MS', '10000')),
+            socketTimeout: Number(readEnvValue('EMAIL_SOCKET_TIMEOUT_MS', '12000')),
             auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
+                user: emailUser,
+                pass: emailPass
             }
         });
     } catch (error) {
@@ -224,7 +251,7 @@ const sendSignupConfirmationEmail = async (username, email) => {
         return false;
     }
 
-    const fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+    const fromAddress = readEnvValue('EMAIL_FROM') || readEnvValue('EMAIL_USER');
 
     await Promise.race([
         transporter.sendMail({
