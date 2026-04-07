@@ -5,6 +5,7 @@ import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
+import fs from 'node:fs';
 
 // import mysql from "mysql2";
 const saltRounds = 10;
@@ -15,18 +16,58 @@ const isProduction = process.env.NODE_ENV === 'production';
 const requiredTableNames = ['donuts', 'login', 'purchase_orders', 'purchase_items'];
 const requiredDbEnvNames = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_PORT'];
 const app = express();
-const dbConfig = {
-    host: process.env.MYSQL_HOST || 'localhost',
-    user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE,
-    port: Number(process.env.MYSQL_PORT || 3306)
-};
 let isSchemaReady = false;
 let lastDatabaseIssue = '';
 
 const getMissingDbEnvVars = () =>
     requiredDbEnvNames.filter((envName) => !process.env[envName]?.toString().trim());
+
+const parseBooleanEnv = (value, fallback = false) => {
+    if (value === undefined) {
+        return fallback;
+    }
+
+    return value.toString().trim().toLowerCase() === 'true';
+};
+
+const getMysqlSslConfig = () => {
+    const host = process.env.MYSQL_HOST || '';
+    const shouldUseSsl = parseBooleanEnv(process.env.MYSQL_SSL, /aivencloud\.com$/i.test(host));
+
+    if (!shouldUseSsl) {
+        return undefined;
+    }
+
+    const sslConfig = {
+        rejectUnauthorized: parseBooleanEnv(process.env.MYSQL_SSL_REJECT_UNAUTHORIZED, true)
+    };
+
+    if (process.env.MYSQL_CA_CERT_BASE64) {
+        sslConfig.ca = Buffer.from(process.env.MYSQL_CA_CERT_BASE64, 'base64').toString('utf8');
+        return sslConfig;
+    }
+
+    if (process.env.MYSQL_CA_CERT) {
+        sslConfig.ca = process.env.MYSQL_CA_CERT;
+        return sslConfig;
+    }
+
+    if (process.env.MYSQL_CA_CERT_PATH) {
+        sslConfig.ca = fs.readFileSync(process.env.MYSQL_CA_CERT_PATH, 'utf8');
+    }
+
+    return sslConfig;
+};
+
+const dbConfig = {
+    host: process.env.MYSQL_HOST || 'localhost',
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || '',
+    database: process.env.MYSQL_DATABASE,
+    port: Number(process.env.MYSQL_PORT || 3306),
+    connectTimeout: Number(process.env.MYSQL_CONNECT_TIMEOUT || 15000),
+    ssl: getMysqlSslConfig()
+};
 
 export const db = mysql.createConnection(dbConfig);
 
