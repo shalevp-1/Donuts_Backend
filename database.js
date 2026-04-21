@@ -363,6 +363,101 @@ app.get('/health/db', async (req, res) => {
     }
 });
 
+app.get('/health/status', async (req, res) => {
+    const missingEnvVars = getMissingDbEnvVars();
+
+    if (missingEnvVars.length > 0) {
+        return res.json({
+            status: 'error',
+            schemaReady: isSchemaReady,
+            missingTables: requiredTableNames,
+            missingEnvVars,
+            lastDatabaseIssue: lastDatabaseIssue || `Missing required database env vars: ${missingEnvVars.join(', ')}`
+        });
+    }
+
+    try {
+        await runDbQuery('SELECT 1 AS dbOk');
+
+        const placeholders = requiredTableNames.map(() => '?').join(', ');
+        const tableRows = await runDbQuery(
+            `
+                SELECT table_name AS tableName
+                FROM information_schema.tables
+                WHERE table_schema = ?
+                AND table_name IN (${placeholders})
+            `,
+            [dbConfig.database, ...requiredTableNames]
+        );
+
+        const foundTables = tableRows.map((row) => row.tableName);
+        const missingTables = requiredTableNames.filter((tableName) => !foundTables.includes(tableName));
+
+        return res.json({
+            status: missingTables.length === 0 ? 'ok' : 'degraded',
+            schemaReady: isSchemaReady,
+            missingTables,
+            missingEnvVars,
+            lastDatabaseIssue
+        });
+    } catch (error) {
+        return res.json({
+            status: 'error',
+            schemaReady: isSchemaReady,
+            missingTables: requiredTableNames,
+            missingEnvVars,
+            lastDatabaseIssue: lastDatabaseIssue || error.code || error.message || 'Database health check failed.'
+        });
+    }
+});
+
+app.get('/auth/status', (req, res) => {
+    applyNoStore(res);
+
+    const unauthenticatedResponse = {
+        status: 'Success',
+        authenticated: false,
+        id: null,
+        name: '',
+        role: '',
+        points: 0,
+        purchaseCount: 0,
+        totalSpent: 0
+    };
+
+    const token = req.cookies.token;
+    if (!token) {
+        return res.json(unauthenticatedResponse);
+    }
+
+    jwt.verify(token, jwtSecret, (err, decoded) => {
+        if (err || !decoded?.id) {
+            return res.json(unauthenticatedResponse);
+        }
+
+        const q = "SELECT id, username, role, COALESCE(points, 0) AS points, COALESCE(purchase_count, 0) AS purchaseCount, COALESCE(total_spent, 0) AS totalSpent FROM login WHERE id = ? LIMIT 1";
+
+        db.query(q, [decoded.id], (dbErr, result) => {
+            if (dbErr || result.length === 0) {
+                return res.json(unauthenticatedResponse);
+            }
+
+            const user = result[0];
+
+            return res.json({
+                status: 'Success',
+                authenticated: true,
+                id: user.id,
+                name: user.username || decoded.name || '',
+                role: user.role || decoded.role || 'user',
+                points: Number(user.points) || 0,
+                purchaseCount: Number(user.purchaseCount) || 0,
+                totalSpent: Number(user.totalSpent) || 0
+            });
+        });
+    });
+});
+
 app.get("/donuts", (req, res) => {
     const q = "SELECT * FROM donuts"
     db.query(q, (err, result) => {
