@@ -6,6 +6,15 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
 import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { createAuthMiddleware } from './authMiddleware.js';
+import {
+    createOriginGuard,
+    isAllowedOrigin,
+    LOCAL_FRONTEND_ORIGIN,
+    parseFrontendOrigins,
+    validateProductionEnvironment
+} from './securityConfig.js';
 
 // import mysql from "mysql2";
 const saltRounds = 10;
@@ -30,10 +39,27 @@ const readEnvValue = (envName, fallback = '') => {
     return trimmed;
 };
 
-const jwtSecret = readEnvValue('JWT_SECRET', "jwt-secret-key");
-const isProduction = readEnvValue('NODE_ENV') === 'production';
+const isProduction = readEnvValue('NODE_ENV') === 'production' || readEnvValue('RENDER') === 'true';
 const requiredTableNames = ['donuts', 'login', 'purchase_orders', 'purchase_items'];
 const requiredDbEnvNames = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE', 'MYSQL_PORT'];
+const productionConfigErrors = isProduction ? validateProductionEnvironment(process.env) : [];
+
+if (productionConfigErrors.length > 0) {
+    console.error(`Invalid production configuration: ${productionConfigErrors.join(' ')}`);
+    process.exit(1);
+}
+
+const configuredJwtSecret = readEnvValue('JWT_SECRET');
+const jwtSecret = configuredJwtSecret || (!isProduction ? randomBytes(32).toString('hex') : '');
+if (!configuredJwtSecret && !isProduction) {
+    console.warn('JWT_SECRET is not set; using a temporary local secret. Sessions will reset when the backend restarts.');
+}
+
+const configuredFrontendOrigins = readEnvValue('FRONTEND_ORIGINS');
+const allowedFrontendOrigins = configuredFrontendOrigins
+    ? parseFrontendOrigins(configuredFrontendOrigins, { requireHttps: isProduction })
+    : isProduction ? [] : [LOCAL_FRONTEND_ORIGIN];
+
 const app = express();
 let isSchemaReady = false;
 let lastDatabaseIssue = '';
@@ -94,6 +120,7 @@ const dbConfig = {
 };
 
 export const db = mysql.createConnection(dbConfig);
+const { verifyUser, verifyAdmin } = createAuthMiddleware({ db, jwt, jwtSecret });
 
 const runDbQuery = (query, values = []) =>
     new Promise((resolve, reject) => {
@@ -176,7 +203,7 @@ const initializeDatabase = async () => {
 
 const getAuthCookieOptions = () => ({
     httpOnly: true,
-    sameSite: isProduction ? 'none' : 'lax',
+    sameSite: 'lax',
     secure: isProduction,
     path: '/'
 });
@@ -207,12 +234,12 @@ const clearAuthCookie = (res) => {
 
 app.use(express.json());
 app.use(cors({
-    origin: true,
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin, allowedFrontendOrigins)),
     methods: ["POST", "PUT", "DELETE", "GET"],
     credentials: true
-}
-));
+}));
 app.use(cookieParser());
+app.use(createOriginGuard(allowedFrontendOrigins));
 
 const createMailTransporter = async () => {
     const emailHost = readEnvValue('EMAIL_HOST');
@@ -276,32 +303,6 @@ const sendSignupConfirmationEmail = async (username, email) => {
 };
 
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-const verifyAdmin = (req, res, next) => {
-    if (req.role !== 'admin') {
-        return res.status(403).json({ error: "Admin access required." });
-    }
-
-    next();
-};
-
-const verifyUser = (req, res, next) => {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ error: "You are not authenticated." });
-    else {
-
-        jwt.verify(token, jwtSecret, (err, decoded) => {
-            if (err) return res.status(401).json({ error: "Your session is no longer valid." });
-            else{
-                req.userId = decoded.id;
-                req.name = decoded.name;
-                req.role = decoded.role;
-            }
-            
-            next();
-        })
-    }
-}
-
 // const db = mysql.createConnection({
 //     host: process.env.MYSQL_HOST,
 //     user: process.env.MYSQL_USER,
@@ -449,7 +450,7 @@ app.get('/auth/status', (req, res) => {
                 authenticated: true,
                 id: user.id,
                 name: user.username || decoded.name || '',
-                role: user.role || decoded.role || 'user',
+                role: user.role || 'user',
                 points: Number(user.points) || 0,
                 purchaseCount: Number(user.purchaseCount) || 0,
                 totalSpent: Number(user.totalSpent) || 0
@@ -461,7 +462,7 @@ app.get('/auth/status', (req, res) => {
 app.get("/donuts", (req, res) => {
     const q = "SELECT * FROM donuts"
     db.query(q, (err, result) => {
-        if (err) return res.json(err);
+        if (err) return res.status(500).json({ error: "We could not load donuts right now." });
         return res.json(result);
     })
 });
@@ -471,20 +472,10 @@ app.get("/donut/:id", (req, res) => {
     const donutId = req.params.id;
     const q = "SELECT * FROM donuts WHERE id =?"
     db.query(q, [donutId], (err, result) => {
-        if (err) return res.json(err);
+        if (err) return res.status(500).json({ error: "We could not load that donut right now." });
         return res.json(result);
     })
 });
-
-
-app.get("/login", (req, res) => {
-    const q = "SELECT * FROM login"
-    db.query(q, (err, result) => {
-        if (err) return res.json(err);
-        return res.json(result);
-    })
-});
-
 
 
 app.post("/donuts", verifyUser, verifyAdmin, (req, res) => {
@@ -531,8 +522,8 @@ app.post("/donuts", verifyUser, verifyAdmin, (req, res) => {
 app.delete("/donuts/:id", verifyUser, verifyAdmin, (req, res) => {
     const donutId = req.params.id;
     const q = "DELETE FROM donuts WHERE id =?"
-    db.query(q, [donutId], (err, result) => {
-        if (err) return res.json(err);
+    db.query(q, [donutId], (err) => {
+        if (err) return res.status(500).json({ error: "We could not delete that donut right now." });
         return res.json("Donut has been deleted succesfully");
     })
 })
@@ -945,9 +936,8 @@ app.post('/login', (req, res) => {
                 if (err) return res.status(500).json({ error: "We could not verify your password right now." });
                 if (isMatch) {
                     const name = result[0].username || result[0].name;
-                    const role = result[0].role || 'user';
                     const id = result[0].id;
-                    const token = jwt.sign({ id, name, role }, jwtSecret, { expiresIn: '1h' });
+                    const token = jwt.sign({ id, name }, jwtSecret, { expiresIn: '1h' });
                     res.cookie('token', token, {
                         ...getAuthCookieOptions(),
                         maxAge: 60 * 60 * 1000
@@ -976,7 +966,6 @@ const logoutHandler = (req, res) => {
 };
 
 app.post('/logout', logoutHandler);
-app.get('/logout', logoutHandler);
 
 const PORT = process.env.PORT || 8800;
 let hasStartedServer = false;
