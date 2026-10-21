@@ -15,7 +15,7 @@ Backend API for **Donuts for You**, a full-stack e-commerce application. Built w
 - Member purchase history
 - Admin user management
 - Database health check endpoint
-- Signup confirmation emails with Nodemailer or Resend
+- Signup confirmation emails with Nodemailer
 
 ## Tech Stack
 - Node.js
@@ -27,7 +27,14 @@ Backend API for **Donuts for You**, a full-stack e-commerce application. Built w
 - CORS
 - dotenv
 - Nodemailer
-- Resend
+
+## Required environment
+
+Copy `.env.example` to `.env` for local development and replace the placeholder values. Never commit `.env`.
+
+Production requires `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_PORT`, `JWT_SECRET`, and `FRONTEND_ORIGINS`. Use a randomly generated `JWT_SECRET` of at least 32 bytes. Set `FRONTEND_ORIGINS` to the exact browser origins, separated by commas; the current deployed frontend is `https://dountstime.netlify.app`. Local CRA uses `http://localhost:3000`.
+
+The frontend uses the Netlify `/api/*` rewrite to reach the Render backend in production. The auth cookie is host-only, `HttpOnly`, `Secure` in production, `SameSite=Lax`, and scoped to `/`; no cookie domain is configured.
 
 ## API Endpoints
 - `POST /register`
