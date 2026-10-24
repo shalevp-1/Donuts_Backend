@@ -6,7 +6,7 @@ The REST API for **Donuts for You**, a donut shop application. It is built with 
 
 ![Entity relationship diagram for the Donuts for You database](./assets/Donuts-backend.png)
 
-The SQL schema is available in [`schema.sql`](./schema.sql). [`aiven-data.sql`](./aiven-data.sql) contains a database export with data.
+The SQL schema is available in [`schema.sql`](./schema.sql).
 
 ## Features
 
@@ -22,6 +22,7 @@ The SQL schema is available in [`schema.sql`](./schema.sql). [`aiven-data.sql`](
 ## Built with
 
 Node.js (ES modules), Express, MySQL (`mysql2`), JWT, bcrypt, cookie-parser, CORS, dotenv, and Nodemailer.
+See the [frontend README](https://github.com/shalevp-1/Donuts_front) for an overview of the application and its features.
 
 ## Run locally
 
